@@ -9,7 +9,11 @@ import type {
 
 type ScanPhase = "idle" | "loading-model" | "recognizing" | "complete" | "error";
 type ScanMode = "vision" | "classic";
+type VisionSupport = "checking" | "available" | "unavailable";
 type ScanResult = OcrResult & { engine: ScanMode };
+type WebGpuNavigator = Navigator & {
+  gpu: { requestAdapter: () => Promise<unknown | null> };
+};
 
 type FlorencePass = {
   labels: string[];
@@ -58,7 +62,18 @@ type PositionedItem = OcrResultItem & {
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const ENHANCED_PASS_LONG_SIDE = 1800;
-const WEBGPU_AVAILABLE = typeof navigator !== "undefined" && "gpu" in navigator;
+
+function canAttemptChromiumWebGpu() {
+  if (typeof navigator === "undefined" || !("gpu" in navigator)) return false;
+
+  // navigator.gpu only says that a browser exposes the API. ONNX Runtime's
+  // WebGPU execution provider currently supports Chromium, but not Firefox or
+  // Safari. Treating those browsers as compatible leads to shader failures at
+  // inference time (commonly "ShaderModule Pad label is invalid" in Firefox).
+  return /(?:Chrome|Chromium|Edg|OPR)\//.test(navigator.userAgent);
+}
+
+const CAN_ATTEMPT_VISION_OCR = canAttemptChromiumWebGpu();
 
 // PaddleOCR's general-purpose defaults resize the longest image side to 960px
 // and discard detection boxes below 0.6 confidence. Product labels often have
@@ -83,6 +98,12 @@ const phaseCopy: Record<ScanPhase, string> = {
 
 function readableError(error: unknown) {
   if (error instanceof Error && error.message) {
+    if (/failed to get gpu adapter|no available backend/i.test(error.message)) {
+      return "Chrome could not access a WebGPU adapter. The app switched to Classic OCR. Enable graphics acceleration in Chrome settings, restart Chrome, and check chrome://gpu before trying Vision OCR again.";
+    }
+    if (/webgpu|ortrun|shader(module)?|gpu compute pipeline/i.test(error.message)) {
+      return "Vision OCR is not compatible with this browser’s GPU runtime. The app switched to Classic OCR; use a current Chrome or Edge release for Florence-2.";
+    }
     return error.message;
   }
 
@@ -472,7 +493,10 @@ export default function LabelLens() {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
-  const [scanMode, setScanMode] = useState<ScanMode>(WEBGPU_AVAILABLE ? "vision" : "classic");
+  const [scanMode, setScanMode] = useState<ScanMode>(CAN_ATTEMPT_VISION_OCR ? "vision" : "classic");
+  const [visionSupport, setVisionSupport] = useState<VisionSupport>(
+    CAN_ATTEMPT_VISION_OCR ? "checking" : "unavailable",
+  );
   const [phase, setPhase] = useState<ScanPhase>("idle");
   const [message, setMessage] = useState("Choose a clear photo to begin.");
   const [isDragging, setIsDragging] = useState(false);
@@ -503,6 +527,32 @@ export default function LabelLens() {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  useEffect(() => {
+    if (!CAN_ATTEMPT_VISION_OCR) return;
+
+    let isCurrent = true;
+    const gpu = (navigator as WebGpuNavigator).gpu;
+    void gpu.requestAdapter()
+      .then((adapter) => {
+        if (!isCurrent) return;
+        if (adapter) {
+          setVisionSupport("available");
+        } else {
+          setVisionSupport("unavailable");
+          setScanMode("classic");
+        }
+      })
+      .catch(() => {
+        if (!isCurrent) return;
+        setVisionSupport("unavailable");
+        setScanMode("classic");
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -592,8 +642,8 @@ export default function LabelLens() {
 
     try {
       if (scanMode === "vision") {
-        if (!WEBGPU_AVAILABLE) {
-          throw new Error("Vision OCR needs WebGPU in this browser. Switch to Classic OCR or use a current WebGPU-capable browser.");
+        if (visionSupport !== "available") {
+          throw new Error("Vision OCR could not access a usable WebGPU adapter. Classic OCR works in this browser.");
         }
 
         setPhase("loading-model");
@@ -666,6 +716,14 @@ export default function LabelLens() {
           : "No text was detected. Try moving closer or reducing glare.",
       );
     } catch (error) {
+      if (
+        scanMode === "vision"
+        && error instanceof Error
+        && /webgpu|ortrun|shader(module)?|gpu compute pipeline/i.test(error.message)
+      ) {
+        setScanMode("classic");
+        setVisionSupport("unavailable");
+      }
       setPhase("error");
       setMessage(readableError(error));
     }
@@ -801,8 +859,12 @@ export default function LabelLens() {
               className={scanMode === "vision" ? "active" : ""}
               type="button"
               onClick={() => setScanMode("vision")}
-              disabled={isBusy || !WEBGPU_AVAILABLE}
-              title={!WEBGPU_AVAILABLE ? "WebGPU is not available in this browser" : undefined}
+              disabled={isBusy || visionSupport !== "available"}
+              title={visionSupport === "checking"
+                ? "Checking this browser's GPU…"
+                : visionSupport === "unavailable"
+                  ? "Florence-2 needs an accessible Chrome or Edge WebGPU adapter"
+                  : undefined}
             >
               <strong>Vision OCR</strong>
               <span>Best accuracy</span>
@@ -826,8 +888,12 @@ export default function LabelLens() {
 
           <p className="first-run-note">
             {scanMode === "vision"
-              ? "Florence-2 uses WebGPU and a ~340 MB one-time model download on most GPUs. Images never leave your browser."
-              : "Classic mode uses enhanced overlapping crops. It is lighter, but less accurate on faint print."}
+              ? visionSupport === "checking"
+                ? "Checking whether this browser can provide a WebGPU adapter…"
+                : "Florence-2 uses WebGPU and a ~340 MB one-time model download on most GPUs. Images never leave your browser."
+              : visionSupport === "unavailable"
+                ? "No usable WebGPU adapter was found. Enable Chrome graphics acceleration, or continue with Classic OCR."
+                : "Classic mode uses enhanced overlapping crops. It is lighter, but less accurate on faint print."}
           </p>
         </div>
 

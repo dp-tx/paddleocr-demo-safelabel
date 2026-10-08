@@ -61,8 +61,11 @@ Pages actions.
 - `vite.config.ts` uses relative asset paths, which is the important setting for
   GitHub Pages subdirectory deployments.
 - Both OCR engines run in Web Workers so model work does not freeze the interface.
-- Vision OCR requires WebGPU. The UI automatically falls back to Classic OCR
-  when WebGPU is unavailable.
+- Vision OCR requires ONNX Runtime's WebGPU execution provider in a current
+  Chrome or Edge release. Firefox and Safari may expose `navigator.gpu`, but
+  ONNX Runtime does not currently support them for this workload. The UI
+  also calls `requestAdapter()` before enabling Vision OCR, then falls back to
+  Classic OCR when hardware acceleration or a usable GPU adapter is unavailable.
 - The demo uses the English PP-OCRv6 model. Change `lang` in `getEngine()` for a
   different supported language model.
 - The ONNX Runtime WebAssembly binary is loaded from its pinned jsDelivr package

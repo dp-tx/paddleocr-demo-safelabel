@@ -14,13 +14,16 @@ type ModelBundle = Awaited<ReturnType<typeof loadModel>>;
 
 let modelPromise: Promise<ModelBundle> | null = null;
 
-async function supportsFloat16() {
+async function getWebGpuAdapter() {
   try {
-    const adapter = await navigator.gpu.requestAdapter();
-    return adapter?.features.has("shader-f16") ?? false;
+    return await navigator.gpu.requestAdapter();
   } catch {
-    return false;
+    return null;
   }
+}
+
+function hasSupportedWebGpuRuntime() {
+  return "gpu" in navigator && /(?:Chrome|Chromium|Edg|OPR)\//.test(navigator.userAgent);
 }
 
 async function loadModel(requestId: string) {
@@ -30,7 +33,13 @@ async function loadModel(requestId: string) {
     message: "Downloading Florence-2 (about 340 MB, cached after the first scan)…",
   });
 
-  const useFloat16 = await supportsFloat16();
+  const adapter = await getWebGpuAdapter();
+  if (!adapter) {
+    throw new Error(
+      "Failed to get GPU adapter. Enable graphics acceleration in Chrome settings, restart Chrome, and check chrome://gpu.",
+    );
+  }
+  const useFloat16 = adapter.features.has("shader-f16");
   const progressCallback = (progress: Record<string, unknown>) => {
     self.postMessage({ id: requestId, status: "model-progress", progress });
   };
@@ -57,8 +66,8 @@ async function loadModel(requestId: string) {
 }
 
 async function recognize(requestId: string, images: Blob[]) {
-  if (!("gpu" in navigator)) {
-    throw new Error("Vision OCR needs WebGPU. Use a current Chrome, Edge, Firefox, or Safari release, or switch to Classic OCR.");
+  if (!hasSupportedWebGpuRuntime()) {
+    throw new Error("Vision OCR currently requires WebGPU in a current Chrome or Edge release. Switch to Classic OCR in this browser.");
   }
 
   // The first request creates the model promise; later scans reuse the same
