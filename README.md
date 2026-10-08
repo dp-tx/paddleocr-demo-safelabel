@@ -1,8 +1,15 @@
 # Label Lens
 
-Label Lens is a static PaddleOCR.js demo for food packaging, shampoo bottles,
-ingredient lists, and similar scene text. OCR runs inside the browser, so the
-selected image is never uploaded to an application server.
+Label Lens is a static, local-first OCR demo for food packaging, shampoo
+bottles, ingredient lists, and similar scene text. It offers two engines:
+
+- **Vision OCR** uses Microsoft Florence-2 through Transformers.js for the best
+  reading accuracy. It uses WebGPU and language context to handle difficult
+  label text.
+- **Classic OCR** uses PaddleOCR.js as a lighter compatibility fallback.
+
+Both engines run inside the browser, so the selected image is never uploaded to
+an application server.
 
 ## Run locally
 
@@ -14,8 +21,8 @@ npm run dev
 ```
 
 Open the URL printed by Vite, choose a JPG, PNG, or WebP image, and select
-**Run OCR**. The first scan takes longer because the browser downloads the
-PaddleOCR and ONNX Runtime assets.
+an OCR mode, then run the scan. The first Vision OCR scan downloads roughly
+340 MB of model files on most GPUs; the browser caches them for later visits.
 
 ## Validate a production build
 
@@ -46,12 +53,16 @@ Pages actions.
 
 ## Implementation notes
 
-- `app/page.tsx` contains file validation, lazy model initialization, OCR,
-  confidence display, clipboard support, and text download.
+- `app/page.tsx` contains file validation, crop enhancement, result merging,
+  lazy model initialization, clipboard support, and text download.
+- `app/florence.worker.ts` runs Florence-2 off the main thread with the
+  quantization mix recommended by Hugging Face for WebGPU.
 - `src/main.tsx` mounts the React application into the static `index.html` page.
 - `vite.config.ts` uses relative asset paths, which is the important setting for
   GitHub Pages subdirectory deployments.
-- PaddleOCR runs in a Web Worker so model work does not freeze the interface.
+- Both OCR engines run in Web Workers so model work does not freeze the interface.
+- Vision OCR requires WebGPU. The UI automatically falls back to Classic OCR
+  when WebGPU is unavailable.
 - The demo uses the English PP-OCRv6 model. Change `lang` in `getEngine()` for a
   different supported language model.
 - The ONNX Runtime WebAssembly binary is loaded from its pinned jsDelivr package

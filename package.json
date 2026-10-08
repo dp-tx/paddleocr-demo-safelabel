@@ -14,6 +14,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.1",
     "@paddleocr/paddleocr-js": "^0.4.2",
     "react": "19.2.6",
     "react-dom": "19.2.6"
@@ -30,6 +31,6 @@
     "globals": "16.4.0",
     "typescript": "5.9.3",
     "typescript-eslint": "8.59.3",
-    "vite": "8.0.13"
+    "vite": "^8.3.4"
   }
 }
