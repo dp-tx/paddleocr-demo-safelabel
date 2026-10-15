@@ -612,7 +612,7 @@ export default function LabelLens() {
       const { PaddleOCR } = await import("@paddleocr/paddleocr-js");
       const engine = (await PaddleOCR.create({
         lang: "en",
-        ocrVersion: "PP-OCRv6",
+        ocrVersion: "OCR-Demo",
         worker: true,
         ortOptions: {
           backend: "auto",
@@ -769,22 +769,22 @@ export default function LabelLens() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="Label Lens home">
+        <a className="brand" href="#top" aria-label="OCR Demo">
           <span className="brand-mark" aria-hidden="true">LL</span>
-          <span>Label Lens</span>
+          <span>SafeLabel OCR Demo</span>
         </a>
         <div className="topbar-meta">
           <span className="model-chip">{scanMode === "vision" ? "Florence-2" : "PP-OCRv6"}</span>
-          <span className="privacy-note">Runs locally in your browser</span>
+          <span className="privacy-note">dp-tx on github</span>
         </div>
       </header>
 
       <section className="hero" id="top">
-        <p className="eyebrow">Local vision OCR demo</p>
-        <h1>Read the fine print.<br />Keep the image private.</h1>
+        <p className="eyebrow">Local OCR Demo</p>
+        <h1>SafeLabel Group OCR Demo.<br />Image is not stored.</h1>
         <p className="hero-copy">
           Drop in a photo of a food package, shampoo bottle, or product label.
-          Label Lens finds the printed text without uploading the image.
+          The demo finds the printed text without uploading the image to a server.
         </p>
       </section>
 
@@ -958,21 +958,9 @@ export default function LabelLens() {
         </div>
       </section>
 
-      <section className="how-it-works" aria-labelledby="how-title">
-        <div>
-          <p className="eyebrow">What happens locally</p>
-          <h2 id="how-title">Two engines. One private workflow.</h2>
-        </div>
-        <ol>
-          <li><span>1</span><p><strong>Enhancement</strong> enlarges small print and evens out shadows on curved labels.</p></li>
-          <li><span>2</span><p><strong>Vision OCR</strong> uses language context to recover difficult words and full lines.</p></li>
-          <li><span>3</span><p><strong>Classic OCR</strong> remains available for lighter devices without WebGPU.</p></li>
-        </ol>
-      </section>
 
       <footer>
-        <span>Powered by Florence-2, Transformers.js &amp; PaddleOCR.js</span>
-        <span>English / Latin labels · No account · No image upload</span>
+        <span>bruh</span>
       </footer>
     </main>
   );
