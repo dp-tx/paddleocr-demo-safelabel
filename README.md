@@ -6,7 +6,8 @@ bottles, ingredient lists, and similar scene text. It offers two engines:
 - **Vision OCR** uses Microsoft Florence-2 through Transformers.js for the best
   reading accuracy. It uses WebGPU and language context to handle difficult
   label text.
-- **Classic OCR** uses PaddleOCR.js as a lighter compatibility fallback.
+- **Classic OCR** uses PaddleOCR.js as a lighter compatibility fallback. Its
+  first-run model download shows exact byte and percentage progress.
 
 Both engines run inside the browser, so the selected image is never uploaded to
 an application server.
@@ -58,6 +59,9 @@ Pages actions.
   lazy model initialization, clipboard support, and text download.
 - `app/classic-ocr-config.json` keeps PaddleOCR's machine identifiers separate
   from user-facing names and is validated by `npm test` without model downloads.
+- `app/classic-model-download.ts` streams the detection and recognition model
+  archives with combined progress, then hands those bytes to PaddleOCR's worker
+  without a second network download.
 - `app/florence.worker.ts` runs Florence-2 off the main thread with the
   quantization mix recommended by Hugging Face for WebGPU.
 - `src/main.tsx` mounts the React application into the static `index.html` page.

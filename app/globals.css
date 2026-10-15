@@ -381,6 +381,58 @@ h2 {
   margin-top: 12px;
 }
 
+.model-download {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f1f0e9;
+}
+
+.model-download-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.model-download-heading span { font-weight: 700; }
+.model-download-heading strong { color: var(--green); font-size: 11px; }
+
+.model-download p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.model-progress-track {
+  position: relative;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #d8ded8;
+}
+
+.model-progress-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--green);
+  transition: width 180ms ease-out;
+}
+
+.model-progress-track.indeterminate > span {
+  position: absolute;
+  left: -35%;
+  animation: progress-glide 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-glide { to { left: 100%; } }
+
 .first-run-note {
   margin: 10px 0 0;
   color: var(--muted);
@@ -449,6 +501,18 @@ h2 {
 }
 
 .busy-result strong { color: var(--ink); font-size: 14px; }
+
+.loading-value {
+  display: grid;
+  min-width: 86px;
+  min-height: 58px;
+  place-items: center;
+  color: var(--green);
+  font-family: Georgia, serif;
+  font-size: 42px;
+  font-style: italic;
+  line-height: 1;
+}
 
 .result-number {
   font-family: Georgia, serif;

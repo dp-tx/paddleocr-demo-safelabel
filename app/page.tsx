@@ -6,12 +6,20 @@ import type {
   OcrRuntimeParamsInput,
   Point2D,
 } from "@paddleocr/paddleocr-js";
+import {
+  downloadClassicModels,
+  type DownloadedClassicModels,
+  type ModelDownloadProgress,
+} from "./classic-model-download";
 import classicOcrConfig from "./classic-ocr-config.json";
 
 type ScanPhase = "idle" | "loading-model" | "recognizing" | "complete" | "error";
 type ScanMode = "vision" | "classic";
 type VisionSupport = "checking" | "available" | "unavailable";
 type ScanResult = OcrResult & { engine: ScanMode };
+type ModelLoadState = ModelDownloadProgress & {
+  stage: "downloading" | "initializing";
+};
 type WebGpuNavigator = Navigator & {
   gpu: { requestAdapter: () => Promise<unknown | null> };
 };
@@ -31,7 +39,12 @@ type FlorenceResponse = {
 type FlorenceProgress = {
   status: string;
   message?: string;
-  progress?: { progress?: number };
+  progress?: {
+    status?: string;
+    progress?: number;
+    loaded?: number;
+    total?: number;
+  };
 };
 
 // Keeping the engine behind a small interface makes the page easier to read and
@@ -96,6 +109,10 @@ const phaseCopy: Record<ScanPhase, string> = {
   complete: "Complete",
   error: "Needs attention",
 };
+
+function formatMegabytes(bytes: number) {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function readableError(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -503,7 +520,7 @@ export default function SafeLabel() {
   const [isDragging, setIsDragging] = useState(false);
   const [copied, setCopied] = useState(false);
   const [passCount, setPassCount] = useState(0);
-  const [modelProgress, setModelProgress] = useState(0);
+  const [modelLoadState, setModelLoadState] = useState<ModelLoadState | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -582,7 +599,7 @@ export default function SafeLabel() {
     setResult(null);
     setCopied(false);
     setPassCount(0);
-    setModelProgress(0);
+    setModelLoadState(null);
     setPhase("idle");
     setMessage("Image ready. Run OCR when you’re happy with the framing.");
   }
@@ -607,25 +624,59 @@ export default function SafeLabel() {
     if (engineRef.current) return engineRef.current;
     if (enginePromiseRef.current) return enginePromiseRef.current;
 
-    // PaddleOCR is a browser-only dependency, so it is loaded on demand rather
-    // than bundled into the initial page. The model downloads only on first use.
+    // Start loading the browser-only SDK while the two model archives download.
+    // Streaming the archives ourselves gives the UI real byte progress; Blob
+    // URLs then hand those exact bytes to Paddle's worker without downloading
+    // them a second time or moving inference onto the main thread.
     enginePromiseRef.current = (async () => {
-      const { PaddleOCR } = await import("@paddleocr/paddleocr-js");
-      const engine = (await PaddleOCR.create({
-        // These are PaddleOCR API identifiers, not user-facing labels. The
-        // shared config is smoke-tested so cosmetic copy cannot break loading.
-        ...classicOcrConfig,
-        worker: true,
-        ortOptions: {
-          backend: "auto",
-          // Pin WASM loading to the package CDN. This avoids shipping a second,
-          // 27 MB copy of ONNX Runtime inside the application bundle.
-          wasmPaths: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/",
-        },
-      })) as OcrEngine;
+      const paddleModulePromise = import("@paddleocr/paddleocr-js");
+      let downloadedModels: DownloadedClassicModels | null = null;
 
-      engineRef.current = engine;
-      return engine;
+      try {
+        downloadedModels = await downloadClassicModels(
+          [
+            {
+              label: "text detection model",
+              url: classicOcrConfig.textDetectionModelAsset.url,
+            },
+            {
+              label: "text recognition model",
+              url: classicOcrConfig.textRecognitionModelAsset.url,
+            },
+          ],
+          (progress) => setModelLoadState({ stage: "downloading", ...progress }),
+        );
+
+        setModelLoadState((current) => ({
+          stage: "initializing",
+          loadedBytes: current?.loadedBytes ?? 0,
+          totalBytes: current?.totalBytes ?? null,
+          percent: 100,
+        }));
+        setMessage("Model download complete. Starting Classic OCR…");
+
+        const { PaddleOCR } = await paddleModulePromise;
+        const engine = (await PaddleOCR.create({
+          // These are PaddleOCR API identifiers, not user-facing labels. The
+          // shared config is smoke-tested so cosmetic copy cannot break loading.
+          ...classicOcrConfig,
+          textDetectionModelAsset: { url: downloadedModels.detectionUrl },
+          textRecognitionModelAsset: { url: downloadedModels.recognitionUrl },
+          worker: true,
+          ortOptions: {
+            backend: "auto",
+            // Pin WASM loading to the package CDN. This avoids shipping a second,
+            // 27 MB copy of ONNX Runtime inside the application bundle.
+            wasmPaths: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/",
+          },
+        })) as OcrEngine;
+
+        engineRef.current = engine;
+        return engine;
+      } finally {
+        // Once initialization settles, the worker no longer needs the Blob URLs.
+        downloadedModels?.revoke();
+      }
     })();
 
     try {
@@ -640,7 +691,7 @@ export default function SafeLabel() {
 
     setResult(null);
     setCopied(false);
-    setModelProgress(0);
+    setModelLoadState(null);
 
     try {
       if (scanMode === "vision") {
@@ -649,6 +700,12 @@ export default function SafeLabel() {
         }
 
         setPhase("loading-model");
+        setModelLoadState({
+          stage: "downloading",
+          loadedBytes: 0,
+          totalBytes: null,
+          percent: null,
+        });
         setMessage("Preparing Florence-2. The first scan downloads about 340 MB once.");
 
         const prepared = await prepareScanSources(file);
@@ -668,9 +725,19 @@ export default function SafeLabel() {
               setPhase("loading-model");
               if (progress.message) setMessage(progress.message);
             } else if (progress.status === "model-progress") {
-              const percentage = progress.progress?.progress;
-              if (typeof percentage === "number") setModelProgress(Math.round(percentage));
+              const aggregate = progress.progress;
+              // Transformers.js also emits progress for each individual file.
+              // Only its aggregate event is monotonic across the whole model.
+              if (aggregate?.status === "progress_total" && typeof aggregate.progress === "number") {
+                setModelLoadState({
+                  stage: aggregate.progress >= 100 ? "initializing" : "downloading",
+                  loadedBytes: typeof aggregate.loaded === "number" ? aggregate.loaded : 0,
+                  totalBytes: typeof aggregate.total === "number" ? aggregate.total : null,
+                  percent: Math.round(aggregate.progress),
+                });
+              }
             } else if (progress.status === "recognizing") {
+              setModelLoadState(null);
               setPhase("recognizing");
               if (progress.message) setMessage(progress.message);
             }
@@ -695,10 +762,17 @@ export default function SafeLabel() {
 
       if (!engineRef.current) {
         setPhase("loading-model");
-        setMessage("Downloading the OCR model. The first scan takes a little longer.");
+        setModelLoadState({
+          stage: "downloading",
+          loadedBytes: 0,
+          totalBytes: null,
+          percent: null,
+        });
+        setMessage("Downloading Classic OCR model files. This happens only on first use.");
       }
 
       const engine = await getEngine();
+      setModelLoadState(null);
       setPhase("recognizing");
       setMessage("Enhancing contrast and scanning overlapping label sections…");
 
@@ -726,6 +800,7 @@ export default function SafeLabel() {
         setScanMode("classic");
         setVisionSupport("unavailable");
       }
+      setModelLoadState(null);
       setPhase("error");
       setMessage(readableError(error));
     }
@@ -763,7 +838,7 @@ export default function SafeLabel() {
     setResult(null);
     setCopied(false);
     setPassCount(0);
-    setModelProgress(0);
+    setModelLoadState(null);
     setPhase("idle");
     setMessage("Choose a clear photo to begin.");
   }
@@ -884,9 +959,52 @@ export default function SafeLabel() {
 
           <button className="primary-button scan-button" type="button" onClick={runOcr} disabled={!file || isBusy}>
             {phase === "loading-model"
-              ? modelProgress > 0 ? `Loading model · ${modelProgress}%` : "Loading OCR model…"
+              ? modelLoadState?.stage === "initializing"
+                ? "Starting OCR engine…"
+                : modelLoadState?.percent !== null && modelLoadState?.percent !== undefined
+                  ? `Downloading model · ${modelLoadState.percent}%`
+                  : "Starting model download…"
               : phase === "recognizing" ? "Reading label…" : `Run ${scanMode === "vision" ? "vision" : "classic"} OCR`}
           </button>
+
+          {phase === "loading-model" && modelLoadState ? (
+            <div className="model-download">
+              <div className="model-download-heading">
+                <span>
+                  {modelLoadState.stage === "initializing"
+                    ? `Starting ${scanMode === "vision" ? "Vision" : "Classic"} OCR`
+                    : `Downloading ${scanMode === "vision" ? "Vision" : "Classic"} OCR`}
+                </span>
+                <strong>
+                  {modelLoadState.stage === "initializing"
+                    ? "Download complete"
+                    : modelLoadState.percent === null ? "Starting…" : `${modelLoadState.percent}%`}
+                </strong>
+              </div>
+              <div
+                className={`model-progress-track${modelLoadState.percent === null ? " indeterminate" : ""}`}
+                role="progressbar"
+                aria-label={`${scanMode === "vision" ? "Vision" : "Classic"} OCR model download`}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={modelLoadState.percent ?? undefined}
+                aria-valuetext={modelLoadState.stage === "initializing"
+                  ? "Download complete. Starting the OCR engine."
+                  : modelLoadState.totalBytes === null
+                    ? `${formatMegabytes(modelLoadState.loadedBytes)} downloaded`
+                    : `${formatMegabytes(modelLoadState.loadedBytes)} of ${formatMegabytes(modelLoadState.totalBytes)}`}
+              >
+                <span style={{ width: `${modelLoadState.percent ?? 35}%` }} />
+              </div>
+              <p>
+                {modelLoadState.stage === "initializing"
+                  ? "The model is downloaded. The OCR engine is starting now."
+                  : modelLoadState.totalBytes === null
+                    ? `${formatMegabytes(modelLoadState.loadedBytes)} downloaded`
+                    : `${formatMegabytes(modelLoadState.loadedBytes)} of ${formatMegabytes(modelLoadState.totalBytes)}`}
+              </p>
+            </div>
+          ) : null}
 
           <p className="first-run-note">
             {scanMode === "vision"
@@ -923,9 +1041,27 @@ export default function SafeLabel() {
 
           {isBusy ? (
             <div className="busy-result" role="status">
-              <span className="spinner" aria-hidden="true" />
+              {phase === "loading-model" ? (
+                <span className="loading-value" aria-hidden="true">
+                  {modelLoadState?.stage === "initializing"
+                    ? "✓"
+                    : modelLoadState?.percent === null || modelLoadState?.percent === undefined
+                      ? "…"
+                      : `${modelLoadState.percent}%`}
+                </span>
+              ) : (
+                <span className="spinner" aria-hidden="true" />
+              )}
               <strong>{phase === "loading-model" ? `Preparing ${scanMode === "vision" ? "Florence-2" : "PaddleOCR"}` : "Inspecting the label"}</strong>
-              <p>{phase === "loading-model" ? "The model is cached by your browser after it downloads." : "Vision OCR reads overlapping sections and may take a minute."}</p>
+              <p>
+                {phase === "loading-model"
+                  ? modelLoadState?.stage === "initializing"
+                    ? "Download complete. Starting the OCR engine…"
+                    : "The model is cached by your browser after it downloads."
+                  : scanMode === "vision"
+                    ? "Vision OCR reads overlapping sections and may take a minute."
+                    : "Classic OCR is scanning enhanced label sections."}
+              </p>
             </div>
           ) : result?.items.length ? (
             <div className="result-content">
