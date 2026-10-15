@@ -1,5 +1,5 @@
 {
-  "name": "label-lens-paddleocr",
+  "name": "safe-label-ocr-demo",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "test": "node scripts/check-classic-ocr-config.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "check": "tsc --noEmit",

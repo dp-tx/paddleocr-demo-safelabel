@@ -1,6 +1,6 @@
-# Label Lens
+# Safe Label
 
-Label Lens is a static, local-first OCR demo for food packaging, shampoo
+Safe Label is a static, local-first OCR demo for food packaging, shampoo
 bottles, ingredient lists, and similar scene text. It offers two engines:
 
 - **Vision OCR** uses Microsoft Florence-2 through Transformers.js for the best
@@ -27,6 +27,7 @@ an OCR mode, then run the scan. The first Vision OCR scan downloads roughly
 ## Validate a production build
 
 ```bash
+npm test
 npm run check
 npm run lint
 npm run build
@@ -55,6 +56,8 @@ Pages actions.
 
 - `app/page.tsx` contains file validation, crop enhancement, result merging,
   lazy model initialization, clipboard support, and text download.
+- `app/classic-ocr-config.json` keeps PaddleOCR's machine identifiers separate
+  from user-facing names and is validated by `npm test` without model downloads.
 - `app/florence.worker.ts` runs Florence-2 off the main thread with the
   quantization mix recommended by Hugging Face for WebGPU.
 - `src/main.tsx` mounts the React application into the static `index.html` page.
@@ -66,8 +69,9 @@ Pages actions.
   ONNX Runtime does not currently support them for this workload. The UI
   also calls `requestAdapter()` before enabling Vision OCR, then falls back to
   Classic OCR when hardware acceleration or a usable GPU adapter is unavailable.
-- The demo uses the English PP-OCRv6 model. Change `lang` in `getEngine()` for a
-  different supported language model.
+- Classic OCR uses PaddleOCR's English `PP-OCRv6` machine identifier internally.
+  The interface deliberately calls it “Classic OCR”; edit
+  `app/classic-ocr-config.json` only when changing the actual OCR model.
 - The ONNX Runtime WebAssembly binary is loaded from its pinned jsDelivr package
   path. Images remain local even though runtime and model files come from CDNs.
 

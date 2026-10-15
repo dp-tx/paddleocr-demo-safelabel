@@ -33,6 +33,7 @@ jobs:
 
       - name: Check types and code quality
         run: |
+          npm test
           npm run check
           npm run lint
 

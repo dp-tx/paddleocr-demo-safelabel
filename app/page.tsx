@@ -6,6 +6,7 @@ import type {
   OcrRuntimeParamsInput,
   Point2D,
 } from "@paddleocr/paddleocr-js";
+import classicOcrConfig from "./classic-ocr-config.json";
 
 type ScanPhase = "idle" | "loading-model" | "recognizing" | "complete" | "error";
 type ScanMode = "vision" | "classic";
@@ -489,7 +490,7 @@ function recognizeWithFlorence(
   });
 }
 
-export default function LabelLens() {
+export default function SafeLabel() {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
@@ -611,14 +612,15 @@ export default function LabelLens() {
     enginePromiseRef.current = (async () => {
       const { PaddleOCR } = await import("@paddleocr/paddleocr-js");
       const engine = (await PaddleOCR.create({
-        lang: "en",
-        ocrVersion: "OCR-Demo",
+        // These are PaddleOCR API identifiers, not user-facing labels. The
+        // shared config is smoke-tested so cosmetic copy cannot break loading.
+        ...classicOcrConfig,
         worker: true,
         ortOptions: {
           backend: "auto",
           // Pin WASM loading to the package CDN. This avoids shipping a second,
           // 27 MB copy of ONNX Runtime inside the application bundle.
-          wasmPaths: "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/",
+          wasmPaths: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/",
         },
       })) as OcrEngine;
 
@@ -769,19 +771,19 @@ export default function LabelLens() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="OCR Demo">
-          <span className="brand-mark" aria-hidden="true">LL</span>
-          <span>SafeLabel OCR Demo</span>
+        <a className="brand" href="#top" aria-label="Safe Label home">
+          <span className="brand-mark" aria-hidden="true">SL</span>
+          <span>Safe Label</span>
         </a>
         <div className="topbar-meta">
-          <span className="model-chip">{scanMode === "vision" ? "Florence-2" : "PP-OCRv6"}</span>
-          <span className="privacy-note">dp-tx on github</span>
+          <span className="model-chip">{scanMode === "vision" ? "Vision OCR" : "Classic OCR"}</span>
+          <span className="privacy-note">Runs locally in your browser</span>
         </div>
       </header>
 
       <section className="hero" id="top">
         <p className="eyebrow">Local OCR Demo</p>
-        <h1>SafeLabel Group OCR Demo.<br />Image is not stored.</h1>
+        <h1>Safe Label OCR Demo.<br />Your image is not stored.</h1>
         <p className="hero-copy">
           Drop in a photo of a food package, shampoo bottle, or product label.
           The demo finds the printed text without uploading the image to a server.
@@ -960,7 +962,8 @@ export default function LabelLens() {
 
 
       <footer>
-        <span>bruh</span>
+        <span>Safe Label · Runs locally in your browser</span>
+        <span>English / Latin labels · No account · No image upload</span>
       </footer>
     </main>
   );
